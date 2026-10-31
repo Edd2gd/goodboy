@@ -97,13 +97,7 @@
            spellcheck="false" placeholder="type your answer">
   </div>
 
-  <!-- Drop in whichever format you record; the browser takes the first one
-       that exists and that it can decode. Missing files are skipped. -->
-  <audio id="praise" preload="auto" playsinline>
-    <source src="good-boy.mp3" type="audio/mpeg">
-    <source src="good-boy.m4a" type="audio/mp4">
-    <source src="good-boy.wav" type="audio/wav">
-  </audio>
+  <audio id="praise" src="good-boy.m4a" preload="auto" playsinline></audio>
 
 <script>
 (function () {
@@ -120,7 +114,7 @@
   var done = false;
   var navigated = false;
   var misses = 0;
-  var audioBroken = false;
+  var unlocked = false;
 
   function normalise(s) {
     return String(s)
@@ -139,26 +133,25 @@
     return goodBoy && itsMe;
   }
 
-  // iOS Safari only plays audio it can trace back to a tap. Unlocking the clip
-  // inside the button press buys us the right to play it hands-free later.
+  // iOS Safari only plays audio it can trace back to a tap. Playing and
+  // immediately pausing inside the button press buys the right to play it
+  // hands-free later.
+  //
+  // Deliberately never touches .muted: muting to hide the unlock and unmuting
+  // in the play() callback means a slow or never-settling promise leaves the
+  // clip muted, and it then plays perfectly silently. The pause is synchronous
+  // for the same reason — an async pause can land after the real playback has
+  // started and kill it.
   function unlockAudio() {
-    if (!praise || audioBroken) return;
-    praise.muted = true;
-    var attempt;
-    try { attempt = praise.play(); } catch (e) { praise.muted = false; return; }
-    if (attempt && attempt.then) {
-      attempt.then(function () {
-        praise.pause();
-        praise.currentTime = 0;
-        praise.muted = false;
-      }, function () {
-        praise.muted = false;
-      });
-    } else {
+    if (!praise || unlocked) return;
+    unlocked = true;
+    try {
+      var attempt = praise.play();
       praise.pause();
       praise.currentTime = 0;
-      praise.muted = false;
-    }
+      // Pausing straight after play() rejects with AbortError. Expected.
+      if (attempt && attempt.catch) { attempt.catch(function () {}); }
+    } catch (e) { /* nothing to do — win() falls back to a tap */ }
   }
 
   function go() {
@@ -178,36 +171,79 @@
     status.textContent = 'Yes you are. You’re such a good boy.';
     status.className = 'correct';
 
-    // Let the clip finish talking before moving on, but never strand him
-    // if the audio is missing, blocked or refuses to play.
-    if (!praise || audioBroken) { setTimeout(go, 1400); return; }
-
-    praise.onended = function () { setTimeout(go, 700); };
-    var played;
-    try {
-      praise.currentTime = 0;
-      played = praise.play();
-    } catch (e) {
-      setTimeout(go, 1400);
-      return;
-    }
-    if (played && played.then) {
-      played.then(null, function () { setTimeout(go, 1400); });
-    }
-    setTimeout(go, 15000);   // hard backstop
+    playPraise();
   }
 
   function offerFallback() {
     fallback.classList.add('show');
   }
 
-  if (praise) {
-    // Only the media element's own error means every source failed; a 404 on
-    // an individual <source> is normal and must not count.
-    praise.addEventListener('error', function (event) {
-      if (event.target === praise) audioBroken = true;
-    }, true);
-    praise.addEventListener('canplay', function () { audioBroken = false; });
+  // Plays the clip and then moves on. If the browser refuses to play without a
+  // fresh tap, ask for one rather than silently skipping the best bit.
+  function playPraise() {
+    if (!praise) { setTimeout(go, 1400); return; }
+
+    praise.onended = function () { setTimeout(go, 700); };
+    praise.onerror = function () { setTimeout(go, 1400); };
+
+    var attempt;
+    try {
+      praise.currentTime = 0;
+      attempt = praise.play();
+    } catch (e) {
+      askForTap();
+      return;
+    }
+    if (attempt && attempt.then) {
+      attempt.then(function () {
+        setTimeout(go, 15000);          // backstop if 'ended' never fires
+      }, function () {
+        askForTap();                    // autoplay refused — one tap fixes it
+      });
+    } else {
+      setTimeout(go, 15000);
+    }
+  }
+
+  function askForTap() {
+    btn.disabled = false;
+    btn.textContent = '\uD83D\uDD0A Tap to hear it';
+    status.textContent = 'Turn your volume up, then tap.';
+    status.className = '';
+    // The mic listener bails out early once done === true, so this is additive.
+    btn.onclick = function () {
+      btn.disabled = true;
+      btn.textContent = '\uD83D\uDC36 Good boy!';
+      status.textContent = 'Yes you are. You\u2019re such a good boy.';
+      status.className = 'correct';
+      try { praise.currentTime = 0; } catch (e) {}
+      var retry = praise.play();
+      if (retry && retry.then) { retry.then(null, function () { setTimeout(go, 800); }); }
+      setTimeout(go, 15000);
+    };
+    setTimeout(go, 25000);   // never strand him if he ignores the prompt
+  }
+
+  // ?debug=1 prints the audio element's live state on screen, so a silent clip
+  // can be diagnosed on the very phone it is failing on.
+  if (/[?&]debug/.test(location.search) && praise) {
+    var dbg = document.createElement('pre');
+    dbg.style.cssText = 'position:fixed;left:0;right:0;bottom:0;margin:0;padding:.6rem;' +
+      'font-size:11px;line-height:1.45;background:rgba(0,0,0,.82);color:#8fdcc0;' +
+      'text-align:left;white-space:pre-wrap;z-index:9';
+    document.body.appendChild(dbg);
+    var tick = function () {
+      var e = praise.error;
+      dbg.textContent =
+        'src        ' + (praise.currentSrc || '(none)') + '\n' +
+        'readyState ' + praise.readyState + '/4    networkState ' + praise.networkState + '\n' +
+        'paused ' + praise.paused + '   muted ' + praise.muted + '   volume ' + praise.volume + '\n' +
+        'duration ' + (isFinite(praise.duration) ? praise.duration.toFixed(2) : '?') +
+          '   currentTime ' + praise.currentTime.toFixed(2) + '\n' +
+        'unlocked ' + unlocked + '   error ' + (e ? e.code + ' ' + (e.message || '') : 'none');
+    };
+    setInterval(tick, 250);
+    tick();
   }
 
   if (!SR) {
