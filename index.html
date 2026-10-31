@@ -97,6 +97,14 @@
            spellcheck="false" placeholder="type your answer">
   </div>
 
+  <!-- Drop in whichever format you record; the browser takes the first one
+       that exists and that it can decode. Missing files are skipped. -->
+  <audio id="praise" preload="auto" playsinline>
+    <source src="good-boy.mp3" type="audio/mpeg">
+    <source src="good-boy.m4a" type="audio/mp4">
+    <source src="good-boy.wav" type="audio/wav">
+  </audio>
+
 <script>
 (function () {
   var btn      = document.getElementById('listen');
@@ -104,12 +112,15 @@
   var heard    = document.getElementById('heard');
   var fallback = document.getElementById('fallback');
   var typed    = document.getElementById('typed');
+  var praise   = document.getElementById('praise');
 
   var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   var recognition = null;
   var listening = false;
   var done = false;
+  var navigated = false;
   var misses = 0;
+  var audioBroken = false;
 
   function normalise(s) {
     return String(s)
@@ -128,6 +139,34 @@
     return goodBoy && itsMe;
   }
 
+  // iOS Safari only plays audio it can trace back to a tap. Unlocking the clip
+  // inside the button press buys us the right to play it hands-free later.
+  function unlockAudio() {
+    if (!praise || audioBroken) return;
+    praise.muted = true;
+    var attempt;
+    try { attempt = praise.play(); } catch (e) { praise.muted = false; return; }
+    if (attempt && attempt.then) {
+      attempt.then(function () {
+        praise.pause();
+        praise.currentTime = 0;
+        praise.muted = false;
+      }, function () {
+        praise.muted = false;
+      });
+    } else {
+      praise.pause();
+      praise.currentTime = 0;
+      praise.muted = false;
+    }
+  }
+
+  function go() {
+    if (navigated) return;
+    navigated = true;
+    window.location.href = 'reveal.html';
+  }
+
   function win() {
     if (done) return;
     done = true;
@@ -136,13 +175,39 @@
     if (recognition) { try { recognition.abort(); } catch (e) {} }
     btn.disabled = true;
     btn.textContent = '🐶 Good boy!';
-    status.textContent = 'Yes you are. Yes you are.';
+    status.textContent = 'Yes you are. You’re such a good boy.';
     status.className = 'correct';
-    setTimeout(function () { window.location.href = 'reveal.html'; }, 1400);
+
+    // Let the clip finish talking before moving on, but never strand him
+    // if the audio is missing, blocked or refuses to play.
+    if (!praise || audioBroken) { setTimeout(go, 1400); return; }
+
+    praise.onended = function () { setTimeout(go, 700); };
+    var played;
+    try {
+      praise.currentTime = 0;
+      played = praise.play();
+    } catch (e) {
+      setTimeout(go, 1400);
+      return;
+    }
+    if (played && played.then) {
+      played.then(null, function () { setTimeout(go, 1400); });
+    }
+    setTimeout(go, 15000);   // hard backstop
   }
 
   function offerFallback() {
     fallback.classList.add('show');
+  }
+
+  if (praise) {
+    // Only the media element's own error means every source failed; a 404 on
+    // an individual <source> is normal and must not count.
+    praise.addEventListener('error', function (event) {
+      if (event.target === praise) audioBroken = true;
+    }, true);
+    praise.addEventListener('canplay', function () { audioBroken = false; });
   }
 
   if (!SR) {
@@ -152,6 +217,8 @@
   } else {
     btn.addEventListener('click', function () {
       if (listening || done) return;
+      unlockAudio();
+
       recognition = new SR();
       recognition.lang = 'en-GB';
       recognition.continuous = true;
@@ -233,15 +300,17 @@
     if (!event.persisted) return;
     done = false;
     listening = false;
+    navigated = false;
     misses = 0;
     document.body.classList.remove('listening');
     btn.disabled = false;
-    btn.textContent = '\uD83C\uDFA4 Tap and tell me';
+    btn.textContent = '🎤 Tap and tell me';
     status.textContent = 'Press the button, then say it out loud.';
     status.className = '';
     heard.textContent = '';
     typed.value = '';
     fallback.classList.remove('show');
+    if (praise) { try { praise.pause(); praise.currentTime = 0; } catch (e) {} }
   });
 })();
 </script>
