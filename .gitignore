@@ -1,0 +1,5 @@
+# Raw recordings stay local — only the processed clip gets published.
+*.aifc
+*.aiff
+*.aif
+*.caf
