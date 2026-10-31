@@ -226,6 +226,23 @@
   typed.addEventListener('input', function () {
     if (isCorrect(typed.value)) win();
   });
+
+  // Coming "back" from the reveal page restores this page from the
+  // back-forward cache with its finished state intact. Put it back to fresh.
+  window.addEventListener('pageshow', function (event) {
+    if (!event.persisted) return;
+    done = false;
+    listening = false;
+    misses = 0;
+    document.body.classList.remove('listening');
+    btn.disabled = false;
+    btn.textContent = '\uD83C\uDFA4 Tap and tell me';
+    status.textContent = 'Press the button, then say it out loud.';
+    status.className = '';
+    heard.textContent = '';
+    typed.value = '';
+    fallback.classList.remove('show');
+  });
 })();
 </script>
 </body>
