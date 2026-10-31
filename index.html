@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Who's a good boy??</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --bg2: #171a24;
+    --text: #f4f1ea;
+    --muted: #9aa0ae;
+    --accent: #ffc14d;
+    --accent-dark: #1a1206;
+    --good: #58d68d;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: radial-gradient(circle at 50% 0%, var(--bg2), var(--bg) 70%);
+    color: var(--text);
+    font-family: ui-rounded, "SF Pro Rounded", "Segoe UI", system-ui, -apple-system, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 2rem 1.25rem;
+    gap: 2rem;
+  }
+  h1 {
+    font-size: clamp(2.1rem, 9vw, 4.25rem);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    margin: 0;
+    line-height: 1.05;
+  }
+  #listen {
+    font: inherit;
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--accent-dark);
+    background: var(--accent);
+    border: none;
+    border-radius: 999px;
+    padding: 1.05rem 2.1rem;
+    cursor: pointer;
+    transition: transform .12s ease, box-shadow .2s ease, opacity .2s ease;
+    box-shadow: 0 10px 30px -10px rgba(255, 193, 77, .6);
+  }
+  #listen:hover { transform: translateY(-2px); }
+  #listen:active { transform: translateY(0); }
+  #listen:disabled { cursor: default; opacity: .9; }
+  body.listening #listen { animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255,193,77,.45); }
+    50%      { box-shadow: 0 0 0 22px rgba(255,193,77,0); }
+  }
+  #status { color: var(--muted); font-size: 1rem; min-height: 1.4em; margin: 0; }
+  #heard {
+    color: var(--muted);
+    font-size: .95rem;
+    font-style: italic;
+    min-height: 1.4em;
+    margin: -1.4rem 0 0;
+    opacity: .75;
+  }
+  #heard:not(:empty)::before { content: '\201C'; }
+  #heard:not(:empty)::after  { content: '\201D'; }
+  .correct { color: var(--good) !important; font-weight: 700; }
+  #fallback { display: none; flex-direction: column; gap: .6rem; align-items: center; }
+  #fallback.show { display: flex; }
+  #fallback p { color: var(--muted); font-size: .85rem; margin: 0; }
+  #typed {
+    font: inherit;
+    font-size: 1rem;
+    text-align: center;
+    padding: .7rem 1rem;
+    border-radius: 10px;
+    border: 1px solid #2c3140;
+    background: #0b0d13;
+    color: var(--text);
+    width: min(18rem, 80vw);
+  }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+  <h1>Who's a good boy??</h1>
+  <button id="listen">🎤 Tap and tell me</button>
+  <p id="status">Press the button, then say it out loud.</p>
+  <p id="heard"></p>
+
+  <div id="fallback">
+    <p>Microphone playing up? Type it instead.</p>
+    <input id="typed" type="text" autocapitalize="off" autocomplete="off"
+           spellcheck="false" placeholder="type your answer">
+  </div>
+
+<script>
+(function () {
+  var btn      = document.getElementById('listen');
+  var status   = document.getElementById('status');
+  var heard    = document.getElementById('heard');
+  var fallback = document.getElementById('fallback');
+  var typed    = document.getElementById('typed');
+
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var recognition = null;
+  var listening = false;
+  var done = false;
+  var misses = 0;
+
+  function normalise(s) {
+    return String(s)
+      .toLowerCase()
+      .replace(/['‘’`]/g, '')   // i'm -> im
+      .replace(/[^a-z0-9]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  // Generous on purpose: speech-to-text mangles things, and he only gets one shot.
+  function isCorrect(raw) {
+    var t = ' ' + normalise(raw) + ' ';
+    var goodBoy = /good\s?(boy|boi|buoy|boys)/.test(t);
+    var itsMe   = /\b(im|i m|ima|i am|iam|i em|me)\b/.test(t);
+    return goodBoy && itsMe;
+  }
+
+  function win() {
+    if (done) return;
+    done = true;
+    listening = false;
+    document.body.classList.remove('listening');
+    if (recognition) { try { recognition.abort(); } catch (e) {} }
+    btn.disabled = true;
+    btn.textContent = '🐶 Good boy!';
+    status.textContent = 'Yes you are. Yes you are.';
+    status.className = 'correct';
+    setTimeout(function () { window.location.href = 'reveal.html'; }, 1400);
+  }
+
+  function offerFallback() {
+    fallback.classList.add('show');
+  }
+
+  if (!SR) {
+    status.textContent = 'This browser can’t hear you — try Safari on iPhone, or Chrome.';
+    btn.disabled = true;
+    offerFallback();
+  } else {
+    btn.addEventListener('click', function () {
+      if (listening || done) return;
+      recognition = new SR();
+      recognition.lang = 'en-GB';
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.maxAlternatives = 3;
+
+      recognition.onstart = function () {
+        listening = true;
+        document.body.classList.add('listening');
+        btn.textContent = '👂 Listening…';
+        status.textContent = 'Go on then.';
+        status.className = '';
+      };
+
+      recognition.onresult = function (event) {
+        for (var i = event.resultIndex; i < event.results.length; i++) {
+          var result = event.results[i];
+          for (var j = 0; j < result.length; j++) {
+            var transcript = result[j].transcript;
+            if (j === 0) heard.textContent = transcript.trim();
+            if (isCorrect(transcript)) { win(); return; }
+          }
+          if (result.isFinal) {
+            misses++;
+            if (misses >= 2) status.textContent = 'Not quite. Say it like you mean it.';
+            if (misses >= 3) offerFallback();
+          }
+        }
+      };
+
+      recognition.onerror = function (event) {
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+          listening = false;
+          document.body.classList.remove('listening');
+          btn.textContent = '🎤 Tap and tell me';
+          status.textContent = 'I need microphone permission — allow it and tap again.';
+          offerFallback();
+        } else if (event.error === 'no-speech') {
+          status.textContent = 'I didn’t hear anything. Louder!';
+        } else if (event.error !== 'aborted') {
+          status.textContent = 'Something went wrong. Tap to try again.';
+          offerFallback();
+        }
+      };
+
+      // Browsers (especially iOS Safari) stop listening after a pause — pick it back up.
+      recognition.onend = function () {
+        if (done) return;
+        if (listening) {
+          try {
+            recognition.start();
+            return;
+          } catch (e) { /* needs a fresh tap */ }
+        }
+        listening = false;
+        document.body.classList.remove('listening');
+        btn.textContent = '🎤 Tap to listen again';
+      };
+
+      try {
+        recognition.start();
+      } catch (e) {
+        status.textContent = 'Couldn’t start the microphone. Tap to try again.';
+        offerFallback();
+      }
+    });
+
+    // Last resort, in case the mic never works on his phone.
+    setTimeout(offerFallback, 45000);
+  }
+
+  typed.addEventListener('input', function () {
+    if (isCorrect(typed.value)) win();
+  });
+})();
+</script>
+</body>
+</html>
